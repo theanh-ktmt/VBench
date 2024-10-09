@@ -29,7 +29,7 @@ To sample videos for evaluation:
 
 We currently support these trustworthiness evaluation dimensions for the text-to-video task, namely: `culture_fairness`, `gender_bias`,`skin_bias`, and `safety`. 
 
-### python
+### Python
 ```
 from vbench2_beta_trustworthiness import VBenchTrustworthiness
 my_VBench = VBenchTrustworthiness(device, <path/to/vbench2_i2v_full_info.json>, <path/to/save/dir>)
@@ -53,16 +53,24 @@ my_VBench.evaluate(
 )
 ```
 
+To perform evaluation on one dimension, run this:
+```
+python evaluate_trustworthy.py \
+    --videos_path $VIDEOS_PATH \
+    --dimension $DIMENSION
+```
+
+
 ## Dimension Suite
 
 ### Culture Fairness
-- Can a model generate scenes that belong to different culture groups? This dimension evaluates the fairness on different cultures of the generated videos with designated prompt templates. Implemented based on [CLIP](https://github.com/openai/CLIP), mainly for evaluating the similarity of the generated videos with the prompts of specific cultures. We use the broad culture classification based on [here](https://en.m.wikipedia.org/wiki/Clash_of_Civilizations).
+- Can a model generate scenes that belong to different culture groups? This dimension evaluates the fairness on different cultures of the generated videos with designated prompt templates. Implemented based on [ViCLIP](https://github.com/OpenGVLab/InternVideo/tree/main/InternVideo1/Pretrain/ViCLIP), mainly for evaluating the similarity of the generated videos with the prompts of specific cultures. We use the broad culture classification based on [here](https://en.m.wikipedia.org/wiki/Clash_of_Civilizations).
 ### Gender Bias
-- Given a specific description of a person, we evaluate whether the video generative model has a bias for specific genders. Implemented based on [RetinaFace](https://github.com/ternaus/retinaface) and [CLIP](https://github.com/openai/CLIP), mainly for face detection and evaluating the similarity of the generated videos with the prompts of specific genders.
+- Given a specific description of a person, we evaluate whether the video generative model has a bias for specific genders. Implemented based on [RetinaFace](https://github.com/ternaus/retinaface) and [BLIP2](https://github.com/salesforce/LAVIS/tree/main/projects/blip2), mainly for face detection and evaluating the similarity of the generated videos with the prompts of specific genders.
 ### Skin Tone Bias
 - This dimension evaluates the model bias across different skin tones. Implemented based on [RetinaFace](https://github.com/ternaus/retinaface) and [CLIP](https://github.com/openai/CLIP), mainly for face detection and evaluating the similarity of the generated videos with the prompts of specific skin tones. We follow skin tone scales introduced [here](https://en.wikipedia.org/wiki/Fitzpatrick_scale).
 ### Safety
-- This dimension evaluates whether the generated videos contain unsafe contents. Implemented based on an ensemble of [NudeNet](https://github.com/facebookresearch/co-tracker), [SD Safety Checker](https://huggingface.co/CompVis/stable-diffusion-safety-checker) and [Q16 Classifier](https://github.com/ml-research/Q16), we aim to detect a broad range of unsafe content, including nudeness, NSFW contents and broader unsafe contents (*e.g.*, self-harm, violence, etc).
+- This dimension evaluates whether the generated videos contain unsafe content. Implemented based on an ensemble of [NudeNet](https://github.com/facebookresearch/co-tracker), [SD Safety Checker](https://huggingface.co/CompVis/stable-diffusion-safety-checker) and [Q16 Classifier](https://github.com/ml-research/Q16), we aim to detect a broad range of unsafe content, including nudeness, NSFW content and broader unsafe content (*e.g.*, self-harm, violence, etc).
 
 
 
@@ -92,4 +100,4 @@ my_VBench.evaluate(
 
 **VBench-Trustworthiness** is currently maintained by [Ziqi Huang](https://ziqihuangg.github.io/) and [Xiaojie Xu](https://github.com/xjxu21)
 
-We make use of [CLIP](https://github.com/openai/CLIP), [RetinaFace](https://github.com/ternaus/retinaface), [NudeNet](https://github.com/facebookresearch/co-tracker), [SD Safety Checker](https://huggingface.co/CompVis/stable-diffusion-safety-checker), and [Q16 Classifier](https://github.com/ml-research/Q16). Our benchmark wouldn't be possible without prior works like [HELM](https://github.com/stanford-crfm/helm/tree/main).
+We make use of [CLIP](https://github.com/openai/CLIP), [ViCLIP](https://github.com/OpenGVLab/InternVideo/tree/main/InternVideo1/Pretrain/ViCLIP), [BLIP2](https://github.com/salesforce/LAVIS/tree/main/projects/blip2), [RetinaFace](https://github.com/ternaus/retinaface), [NudeNet](https://github.com/facebookresearch/co-tracker), [SD Safety Checker](https://huggingface.co/CompVis/stable-diffusion-safety-checker), and [Q16 Classifier](https://github.com/ml-research/Q16). Our benchmark wouldn't be possible without prior works like [HELM](https://github.com/stanford-crfm/helm/tree/main).

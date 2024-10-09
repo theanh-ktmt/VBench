@@ -120,7 +120,7 @@ def parse_args():
     parser.add_argument(
         "--bg_clip2clip_feat_extractor",
         type=str,
-        default='clip',
+        default='dreamsim',
         choices=['clip', 'dreamsim'],
         help="""This will select the model to caculate background
         consistency dimension's scores.
@@ -130,7 +130,7 @@ def parse_args():
     parser.add_argument(
         "--sb_clip2clip_feat_extractor",
         type=str,
-        default='dino',
+        default='dinov2',
         choices=['dino', 'dinov2', 'dreamsim'],
         help="""This will select the model to caculate subject 
         consistency dimension's scores.
@@ -151,6 +151,32 @@ def parse_args():
         help="""Weight for clip-clip scores, consistency dimensions
         """,
     )
+
+    parser.add_argument(
+        "--subject_mapping_file_path",
+        type=str,
+        default=f'{CUR_DIR}/configs/subject_mapping_table.yaml',
+        help="""Mapping table of subject consistency.
+        """,
+    )
+
+    parser.add_argument(
+        "--background_mapping_file_path",
+        type=str,
+        default=f'{CUR_DIR}/configs/background_mapping_table.yaml',
+        help="""Mapping table of background consistency.
+        """,
+    )
+
+    # Weight params for slow-fast evaluation, subject consistency
+    parser.add_argument(
+        "--slow_fast_eval_config",
+        type=str,
+        default=f'{CUR_DIR}/configs/slow_fast_params.yaml',
+        help="""Config files for different clip length.
+        """,
+    )
+
     # for mixture clip length
     parser.add_argument(
         "--clip_length_config",
@@ -162,6 +188,23 @@ def parse_args():
     # for dev branch
     parser.add_argument(
         "--dev_flag",
+        action="store_true",
+        help="""Denote the current state of pipeline
+        """,
+    )
+
+    # control number of video samples for each prompt
+    parser.add_argument(
+        "--num_of_samples_per_prompt",
+        type=int,
+        default=5,
+        help="""Number of samples for each prompt, i.e. prompt-index.mp4
+        """,
+    )
+
+    # for dev branch
+    parser.add_argument(
+        "--static_filter_flag",
         action="store_true",
         help="""Denote the current state of pipeline
         """,
@@ -216,11 +259,12 @@ def main():
     kwargs['w_inclip'] = args.w_inclip
     kwargs['w_clip2clip'] = args.w_clip2clip
     kwargs['use_semantic_splitting'] = args.use_semantic_splitting
-
-    kwargs['inclip_mean'] = 0.
-    kwargs['inclip_std'] = 1.
-    kwargs['clip2clip_mean'] = 0.
-    kwargs['clip2clip_std'] = 1.
+    kwargs['slow_fast_eval_config'] = args.slow_fast_eval_config
+    kwargs['dev_flag'] = args.dev_flag
+    kwargs['sb_mapping_file_path'] = args.subject_mapping_file_path
+    kwargs['bg_mapping_file_path'] = args.background_mapping_file_path
+    kwargs['num_of_samples_per_prompt'] = args.num_of_samples_per_prompt
+    kwargs['static_filter_flag'] = args.static_filter_flag
 
     my_VBench.evaluate(
         videos_path = args.videos_path,

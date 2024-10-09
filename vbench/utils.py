@@ -22,6 +22,11 @@ CACHE_DIR = os.environ.get('VBENCH_CACHE_DIR')
 if CACHE_DIR is None:
     CACHE_DIR = os.path.join(os.path.expanduser('~'), '.cache', 'vbench')
 
+from .distributed import (
+    get_rank,
+    barrier,
+)
+
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -146,14 +151,18 @@ def load_video(video_path, data_transform=None, num_frames=None, return_tensor=T
             video_reader = VideoReader(video_path, width=width, height=height, num_threads=1)
         else:
             video_reader = VideoReader(video_path, num_threads=1)
-        frames = video_reader.get_batch(range(len(video_reader)))  # (T, H, W, C), torch.uint8
-
+        frame_indices = range(len(video_reader))
+        if num_frames:
+            frame_indices = get_frame_indices(
+            num_frames, len(video_reader), sample="middle"
+            )
+        frames = video_reader.get_batch(frame_indices)  # (T, H, W, C), torch.uint8
         buffer = frames.asnumpy().astype(np.uint8)
     else:
         raise NotImplementedError
     
     frames = buffer
-    if num_frames:
+    if num_frames and not video_path.endswith('.mp4'):
         frame_indices = get_frame_indices(
         num_frames, len(frames), sample="middle"
         )
@@ -230,6 +239,8 @@ def init_submodules(dimension_list, local=False, read_frame=False):
         logger.info("\x1b[32m[Local Mode]\x1b[0m Working in local mode, please make sure that the pre-trained model has been fully downloaded.")
     for dimension in dimension_list:
         os.makedirs(CACHE_DIR, exist_ok=True)
+        if get_rank() > 0:
+            barrier()
         if dimension == 'background_consistency':
             # read_frame = False
             if local:
@@ -359,7 +370,11 @@ def init_submodules(dimension_list, local=False, read_frame=False):
                 # wget_command = ['wget', 'https://pjlab-gvm-data.oss-cn-shanghai.aliyuncs.com/internvideo/viclip/ViClip-InternVid-10M-FLT.pth', '-P', os.path.dirname(submodules_dict[dimension]["pretrain"])]
                 wget_command = ['wget', 'https://huggingface.co/OpenGVLab/VBench_Used_Models/resolve/main/ViClip-InternVid-10M-FLT.pth', '-P', os.path.dirname(submodules_dict[dimension]["pretrain"])]
                 subprocess.run(wget_command, check=True)
+
+        if get_rank() == 0:
+            barrier()
     return submodules_dict
+
 
 def get_prompt_from_filename(path: str):
     """

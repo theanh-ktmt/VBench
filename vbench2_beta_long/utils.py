@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 from pathlib import Path
+from bisect import bisect_left
 
 import torch
 import torch.nn as nn
@@ -28,6 +29,45 @@ from scenedetect import open_video, SceneManager, split_video_ffmpeg
 from scenedetect.detectors import ContentDetector
 from scenedetect.video_splitter import split_video_ffmpeg
 from moviepy.editor import VideoFileClip
+from scipy.stats import rankdata
+
+###################################################################################################
+# Consistency Dimensions' Score Distribution Transformation
+
+def quantile_map(inclip_scores, clip2clip_scores, step=0.01):
+    """
+    Perform quantile mapping from clip2clip_scores to inclip_scores.
+
+    Parameters:
+    inclip_scores (array-like): Array of Inclip scores.
+    clip2clip_scores (array-like): Array of Clip2Clip scores.
+    step (float): Step size for generating the mapping table. Default is 0.01.
+
+    Returns:
+    tuple: Mapped Clip2Clip scores, Mapping table between original Clip2Clip scores and mapped scores.
+    """
+    # Convert clip2clip_scores to quantiles
+    ranks = rankdata(clip2clip_scores, method='ordinal')
+    clip2clip_quantiles = ranks / (len(clip2clip_scores) + 1)
+
+    # Use the inverse CDF of inclip_scores to map quantiles to actual values
+    inclip_sorted = np.sort(inclip_scores)
+    inclip_quantiles = np.linspace(0, 1, len(inclip_scores), endpoint=False)
+
+    # Interpolate to find corresponding inclip values for clip2clip quantiles
+    clip2clip_scores_mapped = np.interp(clip2clip_quantiles, inclip_quantiles, inclip_sorted)
+
+    # Generate the mapping table
+    mapping_range = np.arange(0, 1, step)
+    mapping_table = {}
+    
+    for score in mapping_range:
+        # Find the index of the closest quantile to the current score
+        closest_idx = (np.abs(clip2clip_quantiles - score)).argmin()
+        # Map the score to the corresponding mapped value
+        mapping_table[round(float(score), 2)] = round(float(clip2clip_scores_mapped[closest_idx]), 15)
+    
+    return clip2clip_scores_mapped, mapping_table
 
 
 
@@ -158,12 +198,11 @@ def reorganize_clips_results(detailed_results, dimension=None):
     prompt_scores = defaultdict(list)
     for video_result in detailed_results:
         # Extracting the prompt name (long video name) from the path
-        prompt_name = os.path.basename(os.path.dirname(video_result['video_path']))
-        
-        long_video_path = video_result['video_path'].split("split_clip")[0]
+        prompt_name = os.path.basename((video_result['video_path'])).split('_')[0]
+
+        long_video_path = video_result['video_path'].split("filtered_clips")[0]
         prompt_name = os.path.join(long_video_path, prompt_name) + ".mp4"
         prompt_scores[prompt_name].append(video_result['video_results'])
-
 
     average_scores_list = []
     for prompt, scores in prompt_scores.items():
@@ -174,8 +213,14 @@ def reorganize_clips_results(detailed_results, dimension=None):
         })
 
     # Calculate the overall average of all scores
-    all_scores_flat = [score for scores in prompt_scores.values() for score in scores]
-    all_results = sum(all_scores_flat) / len(all_scores_flat) if all_scores_flat else 0
+    # all_scores_flat = [average_score for average_score in prompt_scores.values() for score in scores]
+    # all_results = sum(all_scores_flat) / len(all_scores_flat) if all_scores_flat else 0
+    all_results = sum([item['video_results'] for item in average_scores_list]) / len(average_scores_list) if average_scores_list else 0
+    video_cnt=len([item['video_results'] for item in average_scores_list])
+    if dimension == 'temporal_flickering':
+        average_scores_list.append({
+                'long_video_cnt': video_cnt
+            })
     if dimension == 'imaging_quality':
         all_results = all_results / 100
 
@@ -259,12 +304,12 @@ def get_video_properties(video_path):
 
 ####################################################################################################
 # for temporal flickering
-def build_filerted_info_json(videos_path, output_path, name):
+def build_filtered_info_json(videos_path, output_path, name):
     cur_full_info_dict = {} # to save the prompt and video path info for the current dimensions
 
     # get splitted video paths
-    filtered_clips_path = os.path.join(videos_path, 'filtered_videos')
-
+    # filtered_clips_path = os.path.join(videos_path, 'split_clip')
+    filtered_clips_path = os.path.join(videos_path, 'filtered_videos','filtered_clips')
     for filtered_video_name in os.listdir(filtered_clips_path):
         filtered_video_path = os.path.join(filtered_clips_path, filtered_video_name)
         base_prompt = get_prompt_from_filename(filtered_video_name)
@@ -275,9 +320,12 @@ def build_filerted_info_json(videos_path, output_path, name):
                 "dimension": 'temporal_flickering',
                 "video_list": []
             }
-
         if filtered_video_path.endswith(('.mp4', '.avi', '.mov')):
             cur_full_info_dict[base_prompt]["video_list"].append(filtered_video_path)
+        # if os.path.isdir(filtered_video_path):
+        #     for split_clip_name in os.listdir(filtered_video_path):
+        #         if split_clip_name.endswith(('.mp4', '.avi', '.mov')):
+        #             cur_full_info_dict[base_prompt]["video_list"].append(os.path.join(filtered_video_path, split_clip_name))
 
     cur_full_info_list = list(cur_full_info_dict.values())
 
@@ -287,10 +335,33 @@ def build_filerted_info_json(videos_path, output_path, name):
     print(f'Evaluation meta data saved to {cur_full_info_path}')
     return cur_full_info_path
 
+def linear_interpolate(x, x0, x1, y0, y1):
+    return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
 
+def fuse_inclip_clip2clip(inclip_avg_results, clip2clip_avg_results, inclip_dict, clip2clip_dict, dimension, **kwargs):
+    if clip2clip_avg_results is None:
+        return inclip_avg_results, inclip_dict
 
-def fuse_inclip_clip2clip(inclip_dict, clip2clip_dict, **kwargs):
-    fused_detailed_results = []
+    fused_detailed_results = [] # to record detailed clip2clip & inclip
+    fused_all_results_sum = 0 # to record sum of results for each video
+    fused_all_results_count = 0 # to record nummber of results in each detailed dict
+
+    if dimension == 'subject_consistency':
+        postfix = 'sb'
+    elif dimension == 'background_consistency':
+        postfix = 'bg'
+
+    with open(kwargs['slow_fast_eval_config'] , 'r') as f:
+        params = yaml.safe_load(f)
+
+    kwargs['inclip_mean'] = params.get(f'inclip_mean_{postfix}')
+    kwargs['inclip_std'] = params.get(f'inclip_std_{postfix}')
+    kwargs['clip2clip_mean'] = params.get(f'clip2clip_mean_{postfix}')
+    kwargs['clip2clip_std'] = params.get(f'clip2clip_std_{postfix}')
+    if kwargs['dev_flag']:
+        kwargs['w_inclip'] = params.get(f'w_inclip_{postfix}')
+        kwargs['w_clip2clip'] = params.get(f'w_clip2clip_{postfix}')
+
 
     w_inclip = kwargs['w_inclip']
     w_clip2clip = kwargs['w_clip2clip']
@@ -298,6 +369,13 @@ def fuse_inclip_clip2clip(inclip_dict, clip2clip_dict, **kwargs):
     inclip_std = kwargs['inclip_std']
     clip2clip_mean = kwargs['clip2clip_mean']
     clip2clip_std = kwargs['clip2clip_std']
+
+    # Load the mapping table from the YAML file
+    with open(kwargs[f'{postfix}_mapping_file_path'], 'r') as f:
+        mapping_table = yaml.safe_load(f)
+
+    # Find the interval in the mapping table for clip2clip_score
+    keys = sorted(mapping_table.keys())
 
     clip2clip_dict = {os.path.basename(item['video_path']): item['video_results'] for item in clip2clip_dict}
 
@@ -308,20 +386,36 @@ def fuse_inclip_clip2clip(inclip_dict, clip2clip_dict, **kwargs):
         clip2clip_score = clip2clip_dict.get(os.path.basename(video_path), 0)
 
 
-        # Normalize scores
-        inclip_score = (inclip_score - inclip_mean) / inclip_std
-        clip2clip_score = (clip2clip_score - clip2clip_mean) / clip2clip_std
+        # Find the interval in the mapping table for clip2clip_score using bisect
+        idx = bisect_left(keys, clip2clip_score)
+        if idx == 0:
+            mapped_clip2clip_score = mapping_table[keys[0]]
+        elif idx == len(keys):
+            mapped_clip2clip_score = mapping_table[keys[-1]]
+        else:
+            k0, k1 = keys[idx - 1], keys[idx]
+            mapped_clip2clip_score = linear_interpolate(
+                clip2clip_score, k0, k1,
+                mapping_table[k0], mapping_table[k1]
+            )
 
-        fused_score = inclip_score * w_inclip + clip2clip_score * w_clip2clip
+        # Map clip2clip_score to the scale of inclip_score
+        # mapped_clip2clip_score = (clip2clip_score - clip2clip_mean) / clip2clip_std * inclip_std + inclip_mean
+
+        fused_score = inclip_score * w_inclip + mapped_clip2clip_score * w_clip2clip if mapped_clip2clip_score != 0.0 else inclip_score
         # fused_detailed_results[video_path] = fused_score
         fused_detailed_results.append({
             "video_path": video_path,
             'inclip_score': inclip_score,
             'clip2clip_score': clip2clip_score,
+            'mapped_clip2clip_score': mapped_clip2clip_score,
             "video_results": fused_score
         })
+        fused_all_results_sum += fused_score
+        fused_all_results_count += 1
+    fused_all_results = fused_all_results_sum / fused_all_results_count
 
-    return fused_detailed_results
+    return fused_all_results, fused_detailed_results
 
 
 def get_duration_from_json(video_path, full_info_list, clip_lengths):

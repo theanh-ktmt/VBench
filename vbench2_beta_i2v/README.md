@@ -25,7 +25,7 @@ We ensure that the image content is diverse, in terms of several aspects: scene 
 The original images are of very high resolutions (mainly around 4k and above), and this enable many tasks that requires high-resolution and high quality images.
     <p>
         <img src="../asset/vbench_i2v/image_size_distribution.png" alt="drawing" width="50%" alt/><br>
-        <em>The figure aboves shows the image resolution distribution in our image suite. Each dot represent an image in our image suite. The three reference lines represent 1K (red), 2K (green), and 4K (yellow) resolutions.
+        <em>The figure above shows the image resolution distribution in our image suite. Each dot represents an image in our image suite. The three reference lines represent 1K (red), 2K (green), and 4K (yellow) resolutions.
         </em>
     </p>
     <table>
@@ -347,7 +347,7 @@ my_VBench.evaluate(
 )
 ```
 
-For video quality dimensions, including `subject consistency`, `background_consistency`, `motion_smoothness`, `dynamic_degree`, `aesthetic_quality`, `imaging_quality`, you can refer to the script below.
+<!-- For video quality dimensions, including `subject consistency`, `background_consistency`, `motion_smoothness`, `dynamic_degree`, `aesthetic_quality`, `imaging_quality`, you can refer to the script below.
 ```python
 from vbench import VBench
 my_VBench = VBench("cuda", <path/to/vbench2_i2v_full_info.json>, <path/to/save/dir>)
@@ -365,8 +365,22 @@ my_VBench.evaluate(
     videos_path = "sampled_videos",
     name = "subject_consistency",
     dimension_list = ["subject_consistency"],
-)
+) 
+``` -->
+
+To perform evaluation on one dimension, run this:
 ```
+python evaluate_i2v.py \
+    --videos_path $VIDEOS_PATH \
+    --dimension $DIMENSION \
+    --ratio $RATIO
+```
+
+- The complete list of dimensions:
+    ```
+    ['subject_consistency', 'background_consistency', 'temporal_flickering', 'motion_smoothness', 'dynamic_degree', 'aesthetic_quality', 'imaging_quality', 'i2v_subject', 'i2v_background', 'camera_motion']
+    ```
+
 
 ## :black_nib: Citation
 

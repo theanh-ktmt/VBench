@@ -1,6 +1,7 @@
 import torch
 import os
 from vbench import VBench
+from vbench.distributed import dist_init, print0
 from datetime import datetime
 import argparse
 import json
@@ -56,19 +57,13 @@ def parse_args():
         """,
     )
     parser.add_argument(
-        "--custom_input",
-        action="store_true",
-        required=False,
-        help="(deprecated) use --mode=\"custom_input\" instead",
-    )
-    parser.add_argument(
         "--prompt",
         type=str,
-        default="",
+        default="None",
         help="""Specify the input prompt
         If not specified, filenames will be used as input prompts
         * Mutually exclusive to --prompt_file.
-        ** This option must be used with --custom_input flag
+        ** This option must be used with --mode=custom_input flag
         """
     )
     parser.add_argument(
@@ -78,7 +73,7 @@ def parse_args():
         help="""Specify the path of the file that contains prompt lists
         If not specified, filenames will be used as input prompts
         * Mutually exclusive to --prompt.
-        ** This option must be used with --custom_input flag
+        ** This option must be used with --mode=custom_input flag
         """
     )
     parser.add_argument(
@@ -110,12 +105,13 @@ def parse_args():
 
 def main():
     args = parse_args()
-    print(f'args: {args}')
 
+    dist_init()
+    print0(f'args: {args}')
     device = torch.device("cuda")
     my_VBench = VBench(device, args.full_json_dir, args.output_path)
     
-    print(f'start evaluation')
+    print0(f'start evaluation')
 
     current_time = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
 
@@ -123,18 +119,16 @@ def main():
 
     prompt = []
 
-    assert args.custom_input == False, "(Deprecated) use --mode=custom_input instead"
-    
-    if (args.prompt_file is not None) and (args.prompt != ""):
+    if (args.prompt_file is not None) and (args.prompt != "None"):
         raise Exception("--prompt_file and --prompt cannot be used together")
-    if (args.prompt_file is not None or args.prompt != "") and (not args.mode=='custom_input'):
+    if (args.prompt_file is not None or args.prompt != "None") and (args.mode!='custom_input'):
         raise Exception("must set --mode=custom_input for using external prompt")
 
     if args.prompt_file:
         with open(args.prompt_file, 'r') as f:
             prompt = json.load(f)
         assert type(prompt) == dict, "Invalid prompt file format. The correct format is {\"video_path\": prompt, ... }"
-    elif args.prompt != "":
+    elif args.prompt != "None":
         prompt = [args.prompt]
 
     if args.category != "":
@@ -152,7 +146,7 @@ def main():
         mode=args.mode,
         **kwargs
     )
-    print('done')
+    print0('done')
 
 
 if __name__ == "__main__":

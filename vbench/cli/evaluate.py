@@ -1,13 +1,16 @@
-import torch
 import os
-from vbench import VBench
-from datetime import datetime
+import subprocess
 import argparse
-import json
 
 CUR_DIR = os.path.dirname(os.path.abspath(__file__))
 def register_subparsers(subparser):
     parser = subparser.add_parser('evaluate', formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument(
+        "--ngpus",
+        type=int,
+        default=1,
+        help="Number of GPUs to run evaluation on"
+        )
     parser.add_argument(
         "--output_path",
         type=str,
@@ -28,7 +31,7 @@ def register_subparsers(subparser):
     )
     parser.add_argument(
         "--dimension",
-        nargs='+',
+        type=str,
         required=True,
         help="list of evaluation dimensions, usage: --dimension <dim_1> <dim_2>",
     )
@@ -55,19 +58,13 @@ def register_subparsers(subparser):
         """,
     )
     parser.add_argument(
-        "--custom_input",
-        action="store_true",
-        required=False,
-        help="(deprecated) use --mode=\"custom_input\" instead",
-    )
-    parser.add_argument(
         "--prompt",
         type=str,
-        default="",
+        default="None",
         help="""Specify the input prompt
         If not specified, filenames will be used as input prompts
         * Mutually exclusive to --prompt_file.
-        ** This option must be used with --custom_input flag
+        ** This option must be used with --mode=custom_input flag
         """
     )
     parser.add_argument(
@@ -77,7 +74,7 @@ def register_subparsers(subparser):
         help="""Specify the path of the file that contains prompt lists
         If not specified, filenames will be used as input prompts
         * Mutually exclusive to --prompt.
-        ** This option must be used with --custom_input flag
+        ** This option must be used with --mode=custom_input flag
         """
     )
     parser.add_argument(
@@ -105,48 +102,25 @@ def register_subparsers(subparser):
     )
     parser.set_defaults(func=evaluate)
 
+def stringify_cmd(cmd_ls):
+    cmd = ""
+    for string in cmd_ls:
+        cmd += string + " "
+    return cmd
+
+## TODO
 def evaluate(args):
-    print(f'args: {args}')
+    cmd = ['python', '-m', 'torch.distributed.run', '--standalone', '--nproc_per_node', str(args.ngpus), f'{CUR_DIR}/../launch/evaluate.py']
+    args_dict = vars(args)
+    for arg in args_dict:
+        if arg == "ngpus" or (args_dict[arg] == None) or arg == "func":
+            continue
+        if arg == "videos_path":
+            cmd.append(f"--videos_path=\"{str(args_dict[arg])}\"")
+            continue
+        cmd.append(f'--{arg}')
+        cmd.append(str(args_dict[arg]))
 
-    device = torch.device("cuda")
-    my_VBench = VBench(device, args.full_json_dir, args.output_path)
-    
-    print(f'start evaluation')
-    
-    current_time = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
 
-    kwargs = {}
-
-    prompt = []
-
-    assert args.custom_input == False, "(Deprecated) use --mode=custom_input instead"
-    
-    if (args.prompt_file is not None) and (args.prompt != ""):
-        raise Exception("--prompt_file and --prompt cannot be used together")
-    if (args.prompt_file is not None or args.prompt != "") and (not args.mode=='custom_input'):
-        raise Exception("must set --mode=custom_input for using external prompt")
-
-    if args.prompt_file:
-        with open(args.prompt_file, 'r') as f:
-            prompt = json.load(f)
-        assert type(prompt) == dict, "Invalid prompt file format. The correct format is {\"video_path\": prompt, ... }"
-    elif args.prompt != "":
-        prompt = [args.prompt]
-
-    if args.category != "":
-        kwargs['category'] = args.category
-
-    kwargs['imaging_quality_preprocessing_mode'] = args.imaging_quality_preprocessing_mode
-
-    my_VBench.evaluate(
-        videos_path = args.videos_path,
-        name = f'results_{current_time}',
-        prompt_list=prompt, # pass in [] to read prompt from filename
-        dimension_list = args.dimension,
-        local=args.load_ckpt_from_local,
-        read_frame=args.read_frame,
-        mode=args.mode,
-        **kwargs
-    )
-    print('done')
+    subprocess.run(stringify_cmd(cmd), shell=True)
 

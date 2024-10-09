@@ -1,6 +1,6 @@
 import os
 import json
-
+import cv2
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -8,8 +8,19 @@ from vbench.utils import load_video, load_dimension_info, read_frames_decord_by_
 from vbench.third_party.grit_model import DenseCaptioning
 
 import logging
+
+from .distributed import (
+    get_world_size,
+    get_rank,
+    all_gather,
+    barrier,
+    distribute_list_to_rank,
+    gather_list_of_dict,
+)
+
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 def get_dect_from_grit(model, image_arrays):
     pred = []
@@ -47,7 +58,7 @@ def check_generate(color_key, object_key, predictions):
 def color(model, video_dict, device):
     success_frame_count_all, video_count = 0, 0
     video_results = []
-    for info in tqdm(video_dict):
+    for info in tqdm(video_dict, disable=get_rank() > 0):
         if 'auxiliary_info' not in info:
             raise "Auxiliary info is not in json, please check your json."
         # print(info)
@@ -56,13 +67,25 @@ def color(model, video_dict, device):
         object_info = object_info.replace('a ','').replace('an ','').replace(color_info,'').strip()
         for video_path in info['video_list']:
             video_arrays = load_video(video_path, num_frames=16, return_tensor=False)
+            _, h, w, _ = video_arrays.shape
+            if min(h, w) > 768:
+                scale = 720.0 / min(h, w)
+                new_h = int(scale * h)
+                new_w = int(scale * w)
+                resized_video = np.zeros((video_arrays.shape[0], new_h, new_w, 3), dtype=video_arrays.dtype)
+                for i in range(video_arrays.shape[0]):
+                    resized_video[i] = cv2.resize(video_arrays[i], (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                video_arrays = resized_video
             cur_video_pred = get_dect_from_grit(model ,video_arrays)
             cur_object, cur_object_color = check_generate(color_info, object_info, cur_video_pred)
             if cur_object>0:
                 cur_success_frame_rate = cur_object_color/cur_object
                 success_frame_count_all += cur_success_frame_rate
                 video_count += 1
-                video_results.append({'video_path': video_path, 'video_results': cur_success_frame_rate})
+                video_results.append({
+                    'video_path': video_path, 
+                    'video_results': cur_success_frame_rate,
+                    'cur_success_frame_rate': cur_success_frame_rate,})
     success_rate = success_frame_count_all / video_count
     return success_rate, video_results
         
@@ -72,5 +95,11 @@ def compute_color(json_dir, device, submodules_dict, **kwargs):
     dense_caption_model.initialize_model(**submodules_dict)
     logger.info("Initialize detection model success")
     _, prompt_dict_ls = load_dimension_info(json_dir, dimension='color', lang='en')
+    prompt_dict_ls = distribute_list_to_rank(prompt_dict_ls)
     all_results, video_results = color(dense_caption_model, prompt_dict_ls, device)
+    if get_world_size() > 1:
+        video_results = gather_list_of_dict(video_results)
+        success_frame_count = sum([x['cur_success_frame_rate'] for x in video_results])
+        frame_count = len(video_results)
+        all_results = success_frame_count / frame_count
     return all_results, video_results

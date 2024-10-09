@@ -1,9 +1,11 @@
 import os
+import re
 import importlib
 from itertools import chain
 from pathlib import Path
 from vbench.utils import get_prompt_from_filename, init_submodules, save_json, load_json
 from vbench2_beta_long.utils import split_video_into_scenes, split_video_into_clips, load_clip_lengths, get_duration_from_json
+from vbench2_beta_long.temporal_flickering import filter_static_clips
 from vbench import VBench
 
 
@@ -14,9 +16,20 @@ class VBenchLong(VBench):
         return ["subject_consistency", "background_consistency", "aesthetic_quality", "imaging_quality", "object_class", "multiple_objects", "color", "spatial_relationship", "scene", "temporal_style", 'overall_consistency', "human_action", "temporal_flickering", "motion_smoothness", "dynamic_degree", "appearance_style"]
 
     def preprocess(self, videos_path, mode, threshold = 35.0, segment_length=16, duration=2, **kwargs):
+        # static_filter_flag = (mode == 'long_vbench_standard' and (videos_path.split('/')[-1] == 'temporal_flickering' or 'temporal_flickering' in kwargs['preprocess_dimension_flag']))
+        # static_filter_flag = kwargs['static_filter_flag']
         if "split_clip" in os.listdir(videos_path):
-            print(f"Videos have been splitted into clips in {videos_path}/split_clip")
-            return 
+            # Get all folder names in the split_clip folder
+            split_clip_path=os.path.join(videos_path,"split_clip")
+            split_clip_folders_count = len([folder for folder in os.listdir(split_clip_path) if re.search(r'-\d+$', folder)])
+            
+            # Get the number of files in the videos_path folder that end with '.mp4'
+            mp4_files_count = len([file for file in os.listdir(videos_path) if file.endswith('.mp4')])
+            
+            # Check if the number of folders matches the number of .mp4 files
+            if split_clip_folders_count == mp4_files_count:
+                print(f"Videos have been splitted into clips in {videos_path}/split_clip")
+                return 
 
         # detect transistions
         split_scene_video_path = []
@@ -34,18 +47,13 @@ class VBenchLong(VBench):
                 if split_scene_flag:
                     split_scene_video_path.append(video_path)
 
-
-
-
         full_info_list = load_json(self.full_info_dir)
         dimension_clip_length_config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs", kwargs['clip_length_config'])
         dimension_clip_length = load_clip_lengths(dimension_clip_length_config_path)
 
-
         # split video into clips
         base_output_dir = os.path.join(videos_path, "split_clip")
         os.makedirs(base_output_dir, exist_ok=True)
-
 
         for video_file in os.listdir(videos_path):
             video_path = os.path.join(videos_path, video_file)
@@ -71,10 +79,10 @@ class VBenchLong(VBench):
         print(f"Splitting videos into clips in {base_output_dir}")
 
 
-
     def evaluate(self, videos_path, name, prompt_list=[], dimension_list=None, local=False, read_frame=False, mode='vbench_standard', **kwargs):
         _dimensions = self.build_full_dimension_list()
         is_dimensional_structure = any(os.path.isdir(os.path.join(videos_path, dim)) for dim in _dimensions)
+        kwargs['preprocess_dimension_flag'] = dimension_list
         if is_dimensional_structure:
             # 1. Under dimensions folders
             for dimension in _dimensions:
@@ -192,22 +200,24 @@ class VBenchLong(VBench):
                 })
 
         elif mode=='long_vbench_standard':
+            # if kwargs['static_filter_flag'] and 'temporal_flickering' in dimension_list:
+            #     videos_path = os.path.join(videos_path, 'temporal_filtered_cilps', 'filtered_videos')
             full_info_list = load_json(self.full_info_dir)
             video_names = os.listdir(videos_path)
             postfix = Path(video_names[0]).suffix
             video_clip_folder_names = [name.replace(postfix, '') for name in video_names]
             for prompt_dict in full_info_list:
                 # if the prompt belongs to any dimension we want to evaluate
-                if set(dimension_list) & set(prompt_dict["dimension"]): 
+                if set(dimension_list) & set(prompt_dict["dimension"]):
                     prompt = prompt_dict['prompt_en']
                     prompt_dict['video_list'] = []
-                    for i in range(5): # video index for the same prompt
+                    for i in range(kwargs['num_of_samples_per_prompt']): # video index for the same prompt
                         intended_video_name = f'{prompt}{special_str}-{str(i)}{postfix}'
                         intended_video_name_floder = f'{prompt}{special_str}-{str(i)}'
                         intended_video_clips_name_floder = os.path.join(videos_path, "split_clip", intended_video_name_floder)
 
                         if not os.path.exists(intended_video_clips_name_floder):
-                            print(f'WARNING!!! This required video clips are not found! Missing benchmark videos can lead to unfair evaluation result. The missing video is: {intended_video_clips_name_floder}')
+                            print(f'WARNING!!! This required video clips are not found! Missing benchmark videos can lead to unfair evaluation result. The missing video clips folder is: {intended_video_clips_name_floder}')
                             continue
                         for video_clip_name in os.listdir(intended_video_clips_name_floder):
                             if video_clip_name.split('_')[0] in video_clip_folder_names:

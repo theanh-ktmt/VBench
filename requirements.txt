@@ -1,5 +1,5 @@
 Pillow
-numpy
+numpy<2.0.0
 matplotlib
 timm>=0.9
 torch>=1.12,<2.0.0
@@ -16,7 +16,7 @@ decord
 requests
 pyyaml
 easydict
-pyiqa>=0.1.8
+pyiqa==0.1.10
 lvis
 fairscale>=0.4.4
 fvcore
@@ -26,4 +26,4 @@ boto3
 omegaconf
 transformers==4.33.2
 pycocoevalcap
-# detectron2@git+https://github.com/facebookresearch/detectron2.git@v0.6
+# detectron2@git+https://github.com/facebookresearch/detectron2.git
